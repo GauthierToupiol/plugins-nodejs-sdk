@@ -2,6 +2,9 @@
 
 # Unreleased
 
+- `onAuthentication()` now upserts the feed destination credentials based on the `feed_destination_id` returned by the plugin in the response (extracted from the decrypted OAuth state) instead of the one carried in the request, so the encrypted state is the sole carrier of the destination id
+- Add optional `feed_destination_id` to `ExternalSegmentAuthenticationResponse`
+
 # 0.41.0 2026-06-25
 
 - Fetch the feed destination credentials when a request carries `feed_destination_id`, and pass them to `onUserSegmentUpdate()`, `onTroubleshoot()`, `onDynamicPropertyValuesQuery()` and the instance context builder, so plugins can use the vault credentials and fall back to their legacy credentials
