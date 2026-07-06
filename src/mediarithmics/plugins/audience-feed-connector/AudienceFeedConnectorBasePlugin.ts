@@ -579,16 +579,16 @@ abstract class GenericAudienceFeedConnectorBasePlugin<
         const request = req.body as ExternalSegmentAuthenticationRequest;
         const response = await this.onAuthentication(request);
 
-        if (request.feed_destination_id && response.status === 'ok') {
+        if (response.feed_destination_id && response.status === 'ok') {
           if (!response.refresh_token) {
             throw new Error(`Plugin must return a refresh_token when feed_destination_id is present`);
           }
-          await this.upsertFeedDestinationCredentials(request.feed_destination_id, {
+          await this.upsertFeedDestinationCredentials(response.feed_destination_id, {
             scheme: 'OAUTH2',
             credentials: { refresh_token: response.refresh_token },
           });
           this.logger.debug(
-            `FeedDestinationId: ${request.feed_destination_id} - Credentials upserted after authentication`,
+            `FeedDestinationId: ${response.feed_destination_id} - Credentials upserted after authentication`,
           );
         }
 

@@ -239,6 +239,7 @@ class MyFakeAudienceFeedConnectorWithOAuth extends core.AudienceFeedConnectorBas
     return Promise.resolve({
       status: 'ok',
       refresh_token: 'my-refresh-token',
+      feed_destination_id: request.params?.state,
     });
   }
 }
@@ -299,7 +300,7 @@ class MyFakeAudienceFeedConnectorWithOAuthNoCredentials extends core.AudienceFee
   protected onAuthentication(
     request: ExternalSegmentAuthenticationRequest,
   ): Promise<core.ExternalSegmentAuthenticationResponse> {
-    return Promise.resolve({ status: 'ok' });
+    return Promise.resolve({ status: 'ok', feed_destination_id: request.params?.state });
   }
 }
 
@@ -355,7 +356,7 @@ describe('createOAuthRedirectUrl', function () {
 });
 
 describe('authenticate wrapper', function () {
-  it('should call upsertFeedDestinationCredentials and strip credentials when feed_destination_id present', function (done) {
+  it('should upsert with the feed_destination_id returned by the plugin (from state) and strip credentials', function (done) {
     const rpMockup: sinon.SinonStub = sinon.stub().returns(Promise.resolve({}));
     const plugin = new MyFakeAudienceFeedConnectorWithOAuth(false);
     const runner = new core.TestingPluginRunner(plugin, rpMockup);
@@ -363,7 +364,6 @@ describe('authenticate wrapper', function () {
     const req: ExternalSegmentAuthenticationRequest = {
       user_id: 'user1',
       plugin_version_id: '99',
-      feed_destination_id: '42',
       params: { code: 'auth-code', state: '42' },
     };
 
@@ -373,7 +373,7 @@ describe('authenticate wrapper', function () {
       .end(function (err, res) {
         expect(res.status).to.equal(200);
         expect(JSON.parse(res.text).status).to.be.eq('ok');
-        expect(JSON.parse(res.text).credentials).to.be.undefined;
+        expect(JSON.parse(res.text).refresh_token).to.be.undefined;
         expect(rpMockup.calledOnce).to.be.true;
         expect(rpMockup.args[0][0].uri).to.include('/v1/feed_destinations/42/credentials');
         expect(rpMockup.args[0][0].method).to.be.eq('POST');
@@ -381,7 +381,7 @@ describe('authenticate wrapper', function () {
       });
   });
 
-  it('should not call upsertFeedDestinationCredentials when feed_destination_id is absent', function (done) {
+  it('should not upsert when the plugin returns no feed_destination_id', function (done) {
     const rpMockup: sinon.SinonStub = sinon.stub().returns(Promise.resolve({}));
     const plugin = new MyFakeAudienceFeedConnectorWithOAuth(false);
     const runner = new core.TestingPluginRunner(plugin, rpMockup);
@@ -389,7 +389,7 @@ describe('authenticate wrapper', function () {
     const req: ExternalSegmentAuthenticationRequest = {
       user_id: 'user1',
       plugin_version_id: '99',
-      params: { code: 'auth-code', state: 'some-state' },
+      params: { code: 'auth-code' },
     };
 
     void request(runner.plugin.app)
@@ -402,7 +402,7 @@ describe('authenticate wrapper', function () {
       });
   });
 
-  it('should return 500 when feed_destination_id is present but plugin returns no credentials', function (done) {
+  it('should return 500 when the plugin returns a feed_destination_id but no refresh_token', function (done) {
     const rpMockup: sinon.SinonStub = sinon.stub().returns(Promise.resolve({}));
     const plugin = new MyFakeAudienceFeedConnectorWithOAuthNoCredentials(false);
     const runner = new core.TestingPluginRunner(plugin, rpMockup);
@@ -410,7 +410,6 @@ describe('authenticate wrapper', function () {
     const req: ExternalSegmentAuthenticationRequest = {
       user_id: 'user1',
       plugin_version_id: '99',
-      feed_destination_id: '42',
       params: { code: 'auth-code', state: '42' },
     };
 
