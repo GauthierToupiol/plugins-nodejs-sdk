@@ -86,6 +86,7 @@ export interface ExternalSegmentAuthenticationResponse {
   status: AudienceFeedAuthenticationStatus;
   message?: string;
   refresh_token?: string;
+  feed_destination_id?: string;
 }
 
 export interface ExternalSegmentLogoutResponse {
