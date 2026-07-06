@@ -2,6 +2,8 @@
 
 # Unreleased
 
+# 0.41.1 2026-07-06
+
 - `onAuthentication()` now upserts the feed destination credentials based on the `feed_destination_id` returned by the plugin in the response (extracted from the decrypted OAuth state) instead of the one carried in the request, so the encrypted state is the sole carrier of the destination id
 - Add optional `feed_destination_id` to `ExternalSegmentAuthenticationResponse`
 
