@@ -152,6 +152,45 @@ export class ExampleAudienceFeed extends core.BatchedAudienceFeedConnectorBasePl
     }
   }
 
+  protected async onDestinationAudienceDeletion(
+    request: core.DestinationAudienceDeletionRequest,
+    instanceContext: ExampleAudienceFeedContext,
+    feedDestinationCredentials?: core.FeedDestinationCredentials,
+  ): Promise<core.DestinationAudienceDeletionPluginResponse> {
+    const accountId = instanceContext.feedProperties.findStringProperty('account_id')?.value?.value;
+    const apiToken = feedDestinationCredentials?.credentials.token as string | undefined;
+
+    if (!accountId || !apiToken) {
+      return { status: 'error', message: 'Missing account id or API token', visibility: 'PUBLIC' };
+    }
+
+    try {
+      const destinationAudience = await this.fetchDestinationAudience(accountId, apiToken, request.segment_id);
+
+      if (!destinationAudience) {
+        return { status: 'not_found' };
+      }
+
+      await this.deleteDestinationAudience(accountId, apiToken, destinationAudience.id);
+      return { status: 'ok' };
+    } catch (error) {
+      LoggerWrapper.logger.error('Error while deleting the destination audience', error);
+      return { status: 'error', message: (error as Error).message, visibility: 'PRIVATE' };
+    }
+  }
+
+  private fetchDestinationAudience(
+    accountId: string,
+    apiToken: string,
+    segmentId: string,
+  ): Promise<{ id: string } | undefined> {
+    return Promise.resolve({ id: `${accountId}-${segmentId}` });
+  }
+
+  private deleteDestinationAudience(accountId: string, apiToken: string, destinationAudienceId: string): Promise<void> {
+    return Promise.resolve();
+  }
+
   protected onAuthenticationStatusQuery(
     request: core.ExternalSegmentAuthenticationStatusQueryRequest,
   ): Promise<core.ExternalSegmentAuthenticationStatusQueryResponse> {

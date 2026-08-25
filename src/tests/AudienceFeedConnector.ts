@@ -12,10 +12,12 @@ import { AudienceFeedBatchContext, UserSegmentUpdatePluginFileDeliveryResponseDa
 import { BatchUpdateRequest } from '../mediarithmics/api/core/batchupdate/BatchUpdateInterface';
 import {
   CreateOAuthRedirectUrlPluginResponse,
+  DestinationAudienceDeletionPluginResponse,
   TestAuthenticationPluginResponse,
 } from '../mediarithmics/api/plugin/audiencefeedconnector/AudienceFeedConnectorPluginResponseInterface';
 import {
   CreateOAuthRedirectUrlRequest,
+  DestinationAudienceDeletionRequest,
   ExternalSegmentAuthenticationRequest,
   TestAuthenticationRequest,
 } from '../mediarithmics/api/plugin/audiencefeedconnector/AudienceFeedConnectorRequestInterface';
@@ -658,6 +660,56 @@ describe('External Audience Feed API test', function () {
   });
 });
 
+const emptyPropertiesResponse: core.DataListResponse<core.PluginProperty> = { status: 'ok', count: 0, data: [] };
+
+function feedResponse(feedId: string): core.DataResponse<core.AudienceSegmentExternalFeedResource> {
+  return {
+    status: 'ok',
+    data: {
+      id: feedId,
+      plugin_id: '984',
+      organisation_id: '95',
+      group_id: 'com.mediarithmics.audience-feed',
+      artifact_id: 'awesome-audience-feed',
+      version_id: '1254',
+    },
+  };
+}
+
+function buildFeedRunner(
+  plugin: core.BasePlugin,
+  feedId: string,
+  credentialsImpl: () => Promise<unknown> = () => Promise.resolve({ status: 'ok', data: {} }),
+) {
+  const credentialsCall = sinon.spy(credentialsImpl);
+  const rpMockup: sinon.SinonStub = sinon.stub();
+  rpMockup
+    .withArgs(
+      sinon.match.has(
+        'uri',
+        sinon.match((value: string) => /\/v1\/audience_segment_external_feeds\/(.){1,10}$/.test(value)),
+      ),
+    )
+    .returns(Promise.resolve(feedResponse(feedId)));
+  rpMockup
+    .withArgs(
+      sinon.match.has(
+        'uri',
+        sinon.match((value: string) => /\/v1\/audience_segment_external_feeds\/(.){1,10}\/properties/.test(value)),
+      ),
+    )
+    .returns(Promise.resolve(emptyPropertiesResponse));
+  rpMockup
+    .withArgs(
+      sinon.match.has(
+        'uri',
+        sinon.match((value: string) => /\/v1\/feed_destinations\/(.+)\/credentials/.test(value)),
+      ),
+    )
+    .callsFake(credentialsCall);
+  return { runner: new core.TestingPluginRunner(plugin, rpMockup), credentialsCall };
+}
+
 class CapturingAudienceFeedConnector extends core.AudienceFeedConnectorBasePlugin {
   public capturedFeedDestinationCredentials?: FeedDestinationCredentials;
   public onUserSegmentUpdateCalled = false;
@@ -695,20 +747,6 @@ class CapturingAudienceFeedConnector extends core.AudienceFeedConnectorBasePlugi
 describe('Live path feed destination credentials', function () {
   const feedId = '512';
 
-  const feedResponse: core.DataResponse<core.AudienceSegmentExternalFeedResource> = {
-    status: 'ok',
-    data: {
-      id: feedId,
-      plugin_id: '984',
-      organisation_id: '95',
-      group_id: 'com.mediarithmics.audience-feed',
-      artifact_id: 'awesome-audience-feed',
-      version_id: '1254',
-    },
-  };
-
-  const propertiesResponse: core.DataListResponse<core.PluginProperty> = { status: 'ok', count: 0, data: [] };
-
   function userSegmentUpdateRequest(feedDestinationId?: string): core.UserSegmentUpdateRequest {
     return {
       feed_id: feedId,
@@ -723,35 +761,8 @@ describe('Live path feed destination credentials', function () {
     };
   }
 
-  function buildRunner(plugin: CapturingAudienceFeedConnector, credentialsImpl: () => Promise<unknown>) {
-    const credentialsCall = sinon.spy(credentialsImpl);
-    const rpMockup: sinon.SinonStub = sinon.stub();
-    rpMockup
-      .withArgs(
-        sinon.match.has(
-          'uri',
-          sinon.match((value: string) => /\/v1\/audience_segment_external_feeds\/(.){1,10}$/.test(value)),
-        ),
-      )
-      .returns(Promise.resolve(feedResponse));
-    rpMockup
-      .withArgs(
-        sinon.match.has(
-          'uri',
-          sinon.match((value: string) => /\/v1\/audience_segment_external_feeds\/(.){1,10}\/properties/.test(value)),
-        ),
-      )
-      .returns(Promise.resolve(propertiesResponse));
-    rpMockup
-      .withArgs(
-        sinon.match.has(
-          'uri',
-          sinon.match((value: string) => /\/v1\/feed_destinations\/(.+)\/credentials/.test(value)),
-        ),
-      )
-      .callsFake(credentialsCall);
-    return { runner: new core.TestingPluginRunner(plugin, rpMockup), credentialsCall };
-  }
+  const buildRunner = (plugin: CapturingAudienceFeedConnector, credentialsImpl?: () => Promise<unknown>) =>
+    buildFeedRunner(plugin, feedId, credentialsImpl);
 
   it('passes vault credentials to the handler when the request has feed_destination_id', function (done) {
     const credentials: FeedDestinationCredentials = { scheme: 'API_TOKEN', credentials: { token: 'secret' } };
@@ -842,6 +853,265 @@ describe('Live path feed destination credentials', function () {
         expect(plugin.onTroubleshootCalled).to.be.true;
         expect(plugin.capturedFeedDestinationCredentials).to.be.undefined;
         expect(credentialsCall.called).to.be.false;
+        runner.plugin.pluginCache.clear();
+        done();
+      });
+  });
+});
+
+describe('Destination audience deletion', function () {
+  const feedId = '74';
+
+  class DeletingAudienceFeedConnector extends CapturingAudienceFeedConnector {
+    public capturedRequest?: DestinationAudienceDeletionRequest;
+
+    constructor(private readonly deletionResponse: DestinationAudienceDeletionPluginResponse) {
+      super(false);
+    }
+
+    public capturedInstanceContext?: core.AudienceFeedConnectorBaseInstanceContext;
+
+    protected onDestinationAudienceDeletion(
+      request: DestinationAudienceDeletionRequest,
+      instanceContext: core.AudienceFeedConnectorBaseInstanceContext,
+      feedDestinationCredentials?: FeedDestinationCredentials,
+    ): Promise<DestinationAudienceDeletionPluginResponse> {
+      this.capturedRequest = request;
+      this.capturedInstanceContext = instanceContext;
+      this.capturedFeedDestinationCredentials = feedDestinationCredentials;
+      return Promise.resolve(this.deletionResponse);
+    }
+  }
+
+  function deletionRequest(feedDestinationId?: string): DestinationAudienceDeletionRequest {
+    return {
+      feed_id: feedId,
+      datamart_id: '1023',
+      segment_id: '451256',
+      feed_destination_id: feedDestinationId,
+    };
+  }
+
+  const buildRunner = (plugin: core.BasePlugin, credentialsImpl?: () => Promise<unknown>) =>
+    buildFeedRunner(plugin, feedId, credentialsImpl);
+
+  it('should return not_implemented (400) when onDestinationAudienceDeletion is not overridden', function (done) {
+    const plugin = new MyFakeAudienceFeedConnector(false);
+    const { runner } = buildRunner(plugin);
+
+    void request(runner.plugin.app)
+      .post('/v1/destination_audience_deletion')
+      .send(deletionRequest())
+      .end(function (err, res) {
+        expect(res.status).to.equal(400);
+        expect(JSON.parse(res.text).status).to.be.eq('not_implemented');
+        runner.plugin.pluginCache.clear();
+        done();
+      });
+  });
+
+  it('should return 400 without calling the handler when a required id is missing', function (done) {
+    const plugin = new DeletingAudienceFeedConnector({ status: 'ok' });
+    const rpMockup: sinon.SinonStub = sinon.stub().rejects(new Error('the gateway must not be called'));
+    const runner = new core.TestingPluginRunner(plugin, rpMockup);
+
+    void request(runner.plugin.app)
+      .post('/v1/destination_audience_deletion')
+      .send({ feed_id: feedId, datamart_id: '1023' })
+      .end(function (err, res) {
+        expect(res.status).to.equal(400);
+        expect(JSON.parse(res.text)).to.deep.equal({
+          status: 'error',
+          message: 'Missing feed_id, datamart_id or segment_id',
+          visibility: 'PRIVATE',
+        });
+        expect(plugin.capturedRequest).to.be.undefined;
+        expect(rpMockup.called).to.be.false;
+        runner.plugin.pluginCache.clear();
+        done();
+      });
+  });
+
+  it('should return 200 and ok, without fetching credentials when there is no feed_destination_id', function (done) {
+    const plugin = new DeletingAudienceFeedConnector({ status: 'ok' });
+    const { runner, credentialsCall } = buildRunner(plugin);
+
+    void request(runner.plugin.app)
+      .post('/v1/destination_audience_deletion')
+      .send(deletionRequest())
+      .end(function (err, res) {
+        expect(res.status).to.equal(200);
+        expect(JSON.parse(res.text)).to.deep.equal({ status: 'ok' });
+        expect(plugin.capturedRequest).to.deep.equal({
+          feed_id: feedId,
+          datamart_id: '1023',
+          segment_id: '451256',
+        });
+        expect(plugin.capturedFeedDestinationCredentials).to.be.undefined;
+        expect(credentialsCall.called).to.be.false;
+        runner.plugin.pluginCache.clear();
+        done();
+      });
+  });
+
+  it('should pass freshly fetched vault credentials to the handler, ignoring the plugin cache', function (done) {
+    const credentials: FeedDestinationCredentials = { scheme: 'API_TOKEN', credentials: { token: 'rotated' } };
+    const plugin = new DeletingAudienceFeedConnector({ status: 'ok' });
+    const { runner, credentialsCall } = buildRunner(plugin, () => Promise.resolve({ status: 'ok', data: credentials }));
+
+    void runner.plugin.pluginCache.put(
+      'feed_destination_credentials:42',
+      Promise.resolve({ scheme: 'API_TOKEN', credentials: { token: 'revoked' } }),
+      3600,
+    );
+
+    void request(runner.plugin.app)
+      .post('/v1/destination_audience_deletion')
+      .send(deletionRequest('42'))
+      .end(function (err, res) {
+        expect(res.status).to.equal(200);
+        expect(credentialsCall.called).to.be.true;
+        expect(plugin.capturedFeedDestinationCredentials).to.deep.equal(credentials);
+        runner.plugin.pluginCache.clear();
+        done();
+      });
+  });
+
+  it('should return 200 and not_found when the destination audience is already absent', function (done) {
+    const plugin = new DeletingAudienceFeedConnector({ status: 'not_found', message: 'Segment 42 not found' });
+    const { runner } = buildRunner(plugin);
+
+    void request(runner.plugin.app)
+      .post('/v1/destination_audience_deletion')
+      .send(deletionRequest())
+      .end(function (err, res) {
+        expect(res.status).to.equal(200);
+        expect(JSON.parse(res.text).status).to.be.eq('not_found');
+        expect(JSON.parse(res.text).message).to.be.eq('Segment 42 not found');
+        expect(JSON.parse(res.text).visibility).to.be.eq('PRIVATE');
+        runner.plugin.pluginCache.clear();
+        done();
+      });
+  });
+
+  it('should return 500 with a PRIVATE message by default when the deletion fails', function (done) {
+    const plugin = new DeletingAudienceFeedConnector({
+      status: 'error',
+      message: 'HTTP 503 from https://api.partner.com/v2/audiences/42',
+    });
+    const { runner } = buildRunner(plugin);
+
+    void request(runner.plugin.app)
+      .post('/v1/destination_audience_deletion')
+      .send(deletionRequest())
+      .end(function (err, res) {
+        expect(res.status).to.equal(500);
+        expect(JSON.parse(res.text).status).to.be.eq('error');
+        expect(JSON.parse(res.text).visibility).to.be.eq('PRIVATE');
+        expect(JSON.parse(res.text).message).to.be.eq('HTTP 503 from https://api.partner.com/v2/audiences/42');
+        runner.plugin.pluginCache.clear();
+        done();
+      });
+  });
+
+  it('should expose the error message when the connector asks for it', function (done) {
+    const plugin = new DeletingAudienceFeedConnector({
+      status: 'error',
+      message: 'This audience is shared with another line item and cannot be deleted.',
+      visibility: 'PUBLIC',
+    });
+    const { runner } = buildRunner(plugin);
+
+    void request(runner.plugin.app)
+      .post('/v1/destination_audience_deletion')
+      .send(deletionRequest())
+      .end(function (err, res) {
+        expect(res.status).to.equal(500);
+        expect(JSON.parse(res.text).visibility).to.be.eq('PUBLIC');
+        runner.plugin.pluginCache.clear();
+        done();
+      });
+  });
+
+  it('should leave the instance context cached by the live path untouched', function (done) {
+    const plugin = new DeletingAudienceFeedConnector({ status: 'ok' });
+    const { runner } = buildRunner(plugin);
+    const livePathContext = { feed: feedResponse(feedId).data, feedProperties: 'LIVE_PATH_CONTEXT' };
+
+    void runner.plugin.pluginCache.put(feedId, Promise.resolve(livePathContext), 3600);
+
+    void request(runner.plugin.app)
+      .post('/v1/destination_audience_deletion')
+      .send(deletionRequest())
+      .end(function (err, res) {
+        expect(res.status).to.equal(200);
+        expect(plugin.capturedInstanceContext).to.not.equal(livePathContext);
+        void (runner.plugin.pluginCache.get(feedId) as Promise<unknown>).then((cached) => {
+          expect(cached).to.equal(livePathContext);
+          runner.plugin.pluginCache.clear();
+          done();
+        });
+      });
+  });
+
+  it('should report an instance context build failure as PRIVATE', function (done) {
+    const plugin = new DeletingAudienceFeedConnector({ status: 'ok' });
+    const rpMockup: sinon.SinonStub = sinon.stub().rejects(new Error('Not Found'));
+    const runner = new core.TestingPluginRunner(plugin, rpMockup);
+
+    void request(runner.plugin.app)
+      .post('/v1/destination_audience_deletion')
+      .send(deletionRequest())
+      .end(function (err, res) {
+        expect(res.status).to.equal(500);
+        expect(JSON.parse(res.text).status).to.be.eq('error');
+        expect(JSON.parse(res.text).visibility).to.be.eq('PRIVATE');
+        expect(plugin.capturedRequest).to.be.undefined;
+        runner.plugin.pluginCache.clear();
+        done();
+      });
+  });
+
+  it('should report an AudienceFeedInstanceContextError as PUBLIC', function (done) {
+    class BadContextAudienceFeedConnector extends DeletingAudienceFeedConnector {
+      protected instanceContextBuilder(): Promise<core.AudienceFeedConnectorBaseInstanceContext> {
+        return Promise.reject(new core.AudienceFeedInstanceContextError('The "Account id" property is missing'));
+      }
+    }
+
+    const plugin = new BadContextAudienceFeedConnector({ status: 'ok' });
+    const { runner } = buildRunner(plugin);
+
+    void request(runner.plugin.app)
+      .post('/v1/destination_audience_deletion')
+      .send(deletionRequest())
+      .end(function (err, res) {
+        expect(res.status).to.equal(500);
+        expect(JSON.parse(res.text).status).to.be.eq('error');
+        expect(JSON.parse(res.text).visibility).to.be.eq('PUBLIC');
+        expect(JSON.parse(res.text).message).to.be.eq('The "Account id" property is missing');
+        runner.plugin.pluginCache.clear();
+        done();
+      });
+  });
+
+  it('should report an uncaught connector error as PRIVATE', function (done) {
+    class ThrowingAudienceFeedConnector extends DeletingAudienceFeedConnector {
+      protected onDestinationAudienceDeletion(): Promise<DestinationAudienceDeletionPluginResponse> {
+        return Promise.reject(new Error('ECONNRESET api.partner.com'));
+      }
+    }
+
+    const plugin = new ThrowingAudienceFeedConnector({ status: 'ok' });
+    const { runner } = buildRunner(plugin);
+
+    void request(runner.plugin.app)
+      .post('/v1/destination_audience_deletion')
+      .send(deletionRequest())
+      .end(function (err, res) {
+        expect(res.status).to.equal(500);
+        expect(JSON.parse(res.text).status).to.be.eq('error');
+        expect(JSON.parse(res.text).visibility).to.be.eq('PRIVATE');
         runner.plugin.pluginCache.clear();
         done();
       });
