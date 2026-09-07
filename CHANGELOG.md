@@ -2,6 +2,16 @@
 
 # Unreleased
 
+- Add the optional `onDestinationAudienceDeletion()` hook, served on `POST /v1/destination_audience_deletion`, so a connector can delete the audience it created on the destination platform. Defaults to `'not_implemented'` (HTTP 400) like the other optional hooks
+- Add `DestinationAudienceDeletionRequest` (`feed_id`, `datamart_id`, `segment_id`, optional `feed_destination_id`) and `DestinationAudienceDeletionPluginResponse` with the new `DestinationAudienceDeletionStatus`: `'ok'` and `'not_found'` are both successful end states (HTTP 200), `'error'` maps to HTTP 500 and `'not_implemented'` to HTTP 400
+- The platform only calls the route on a plugin version declaring the `CLEANING_AND_DELETION` feature, so implementing the hook is not enough on its own: the feature has to be set on the plugin version. It calls the route while the feed still exists and, on `'ok'` or `'not_found'`, closes the running feed sessions and moves the feed to `PAUSED` — the feed itself is never deleted, and it can no longer be activated nor rebooted
+- The feed destination credentials are fetched and passed to the hook when the request carries `feed_destination_id`, as for the other hooks that receive them
+- `DestinationAudienceDeletionPluginResponse.visibility` controls whether the platform displays `message` to the end user. It is only emitted alongside a `message`, and defaults to `'PUBLIC'` for `'ok'` and `'PRIVATE'` otherwise, so a `'not_found'` message describing the destination platform is not surfaced unless the connector opts in. An uncaught error is reported as `'PRIVATE'` unless it carries `visibility: 'PUBLIC'`, as `AudienceFeedInstanceContextError` does. The platform displays the message only on an explicit `'PUBLIC'`, and reports a generic message otherwise
+- `/v1/destination_audience_deletion` reads nothing from and writes nothing to the plugin cache: it builds a fresh instance context and fetches the feed destination credentials directly, so an irreversible deletion never runs on cached feed properties nor on credentials revoked or rotated up to the cache expiration earlier, and never replaces the context the live paths (`/v1/user_segment_update`, batch updates) have cached for the same feed
+- `/v1/destination_audience_deletion` answers HTTP 400 without calling the hook when `feed_id`, `datamart_id` or `segment_id` is missing from the request, rather than letting a destructive call run on an undefined id
+- Add `buildFreshInstanceContext()`, the uncached counterpart of `getInstanceContext()`, for one-shot side routes
+- `onDestinationAudienceDeletion()` implementations must be idempotent: the platform short-circuits a feed whose destination audience is already deleted, but two concurrent calls can both reach the hook, and answering `'not_found'` on an already absent audience is a success
+
 # 0.41.1 2026-07-06
 
 - `onAuthentication()` now upserts the feed destination credentials based on the `feed_destination_id` returned by the plugin in the response (extracted from the decrypted OAuth state) instead of the one carried in the request, so the encrypted state is the sole carrier of the destination id

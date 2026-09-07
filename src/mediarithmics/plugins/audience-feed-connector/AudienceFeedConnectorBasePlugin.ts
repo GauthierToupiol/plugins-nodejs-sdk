@@ -24,6 +24,7 @@ import {
   UserAgentIdentifierRealmSelectionResourcesResponse,
 } from '../../api/core/webdomain/UserAgentIdentifierRealmSelectionInterface';
 import {
+  AudienceFeedInstanceContextError,
   BatchedUserSegmentUpdatePluginResponse,
   CreateOAuthRedirectUrlPluginResponse,
   TestAuthenticationPluginResponse,
@@ -34,6 +35,7 @@ import {
   ExternalSegmentDynamicPropertyValuesQueryResponse,
   ExternalSegmentLogoutResponse,
   ExternalSegmentTroubleshootResponse,
+  DestinationAudienceDeletionPluginResponse,
   MissingRealmError,
   UserSegmentUpdatePluginResponse,
 } from '../../api/plugin/audiencefeedconnector/AudienceFeedConnectorPluginResponseInterface';
@@ -49,6 +51,7 @@ import {
   ExternalSegmentLogoutRequest,
   ExternalSegmentTroubleshootActions,
   ExternalSegmentTroubleshootRequest,
+  DestinationAudienceDeletionRequest,
   UserSegmentUpdateRequest,
 } from '../../api/plugin/audiencefeedconnector/AudienceFeedConnectorRequestInterface';
 import { BasePlugin, PropertiesWrapper, ResourceNotFoundError } from '../common';
@@ -69,6 +72,7 @@ abstract class GenericAudienceFeedConnectorBasePlugin<
     this.initExternalSegmentConnection();
     this.initUserSegmentUpdate();
     this.initTroubleshoot();
+    this.initDestinationAudienceDeletion();
     this.initAuthenticationStatusQuery();
     this.initAuthentication();
     this.initLogoutQuery();
@@ -229,6 +233,14 @@ abstract class GenericAudienceFeedConnectorBasePlugin<
     return Promise.resolve({ status: 'not_implemented' });
   }
 
+  protected onDestinationAudienceDeletion(
+    request: DestinationAudienceDeletionRequest,
+    instanceContext: AudienceFeedConnectorBaseInstanceContext,
+    feedDestinationCredentials?: FeedDestinationCredentials,
+  ): Promise<DestinationAudienceDeletionPluginResponse> {
+    return Promise.resolve({ status: 'not_implemented' });
+  }
+
   protected onAuthenticationStatusQuery(
     request: ExternalSegmentAuthenticationStatusQueryRequest,
   ): Promise<ExternalSegmentAuthenticationStatusQueryResponse> {
@@ -282,6 +294,13 @@ abstract class GenericAudienceFeedConnectorBasePlugin<
       );
     }
     return this.pluginCache.get(feedId) as Promise<AudienceFeedConnectorBaseInstanceContext>;
+  }
+
+  protected buildFreshInstanceContext(
+    feedId: string,
+    feedDestinationCredentials?: FeedDestinationCredentials,
+  ): Promise<AudienceFeedConnectorBaseInstanceContext> {
+    return this.instanceContextBuilder(feedId, feedDestinationCredentials);
   }
 
   async getFeedDestinationCredentials(feedDestinationId: string): Promise<FeedDestinationCredentials | undefined> {
@@ -533,6 +552,85 @@ abstract class GenericAudienceFeedConnectorBasePlugin<
         return res.status(500).send({ status: 'error', message: `${(error as Error).message}` });
       }
     });
+  }
+
+  private initDestinationAudienceDeletion(): void {
+    this.app.post(
+      '/v1/destination_audience_deletion',
+      this.emptyBodyFilter,
+      async (req: express.Request, res: express.Response) => {
+        try {
+          this.logger.debug('POST /v1/destination_audience_deletion', { request: req.body });
+
+          const request = req.body as DestinationAudienceDeletionRequest;
+
+          if (!request.feed_id || !request.datamart_id || !request.segment_id) {
+            const invalidRequestResponse: DestinationAudienceDeletionPluginResponse = {
+              status: 'error',
+              message: 'Missing feed_id, datamart_id or segment_id',
+              visibility: 'PRIVATE',
+            };
+            this.logger.error('POST /v1/destination_audience_deletion : invalid request', { request: req.body });
+            return res.status(400).send(JSON.stringify(invalidRequestResponse));
+          }
+
+          if (!this.httpIsReady()) {
+            throw new Error('Plugin not initialized');
+          }
+
+          const feedDestinationCredentials = request.feed_destination_id
+            ? await this.fetchFeedDestinationCredentialsOptional(request.feed_destination_id)
+            : undefined;
+
+          const instanceContext = await this.buildFreshInstanceContext(request.feed_id, feedDestinationCredentials);
+
+          const response = await this.onDestinationAudienceDeletion(
+            request,
+            instanceContext,
+            feedDestinationCredentials,
+          );
+
+          const pluginResponse: DestinationAudienceDeletionPluginResponse = {
+            status: response.status,
+          };
+
+          if (response.message) {
+            pluginResponse.message = response.message;
+            pluginResponse.visibility = response.visibility ?? (response.status === 'ok' ? 'PUBLIC' : 'PRIVATE');
+          }
+
+          let statusCode: number;
+          switch (response.status) {
+            case 'ok':
+            case 'not_found':
+              statusCode = 200;
+              break;
+            case 'error':
+              statusCode = 500;
+              break;
+            case 'not_implemented':
+              statusCode = 400;
+              break;
+            default:
+              statusCode = 500;
+          }
+
+          this.logger.debug(`FeedId: ${request.feed_id} - Destination audience deletion returning: ${statusCode}`, {
+            response: pluginResponse,
+          });
+
+          return res.status(statusCode).send(JSON.stringify(pluginResponse));
+        } catch (error) {
+          this.logger.error('Something bad happened on destination audience deletion', error);
+          const pluginResponse: DestinationAudienceDeletionPluginResponse = {
+            status: 'error',
+            message: `${(error as Error).message}`,
+            visibility: (error as AudienceFeedInstanceContextError).visibility === 'PUBLIC' ? 'PUBLIC' : 'PRIVATE',
+          };
+          return res.status(500).send(JSON.stringify(pluginResponse));
+        }
+      },
+    );
   }
 
   private initAuthenticationStatusQuery(): void {

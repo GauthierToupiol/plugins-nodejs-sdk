@@ -10,7 +10,12 @@ export declare type AudienceFeedConnectorAuthenticationStatus =
   | 'not_implemented';
 export declare type AudienceFeedAuthenticationStatus = 'ok' | 'error' | 'not_implemented';
 export declare type AudienceFeedLogoutStatus = 'ok' | 'error' | 'not_implemented';
-export declare type AudienceFeedConnectorDynamicPropertyValuesQueryStatus = 'ok' | 'error' | 'empty' | 'not_implemented';
+export declare type DestinationAudienceDeletionStatus = 'ok' | 'not_found' | 'error' | 'not_implemented';
+export declare type AudienceFeedConnectorDynamicPropertyValuesQueryStatus =
+  | 'ok'
+  | 'error'
+  | 'empty'
+  | 'not_implemented';
 export type AudienceFeedConnectorContentType = 'text/csv' | 'application/json' | 'text/plain';
 
 export interface UserSegmentUpdatePluginResponse {
@@ -71,6 +76,12 @@ export interface ExternalSegmentTroubleshootResponse {
   status: AudienceFeedConnectorTroubleshootStatus;
   message?: string;
   data?: any;
+}
+
+export interface DestinationAudienceDeletionPluginResponse {
+  status: DestinationAudienceDeletionStatus;
+  message?: string;
+  visibility?: Visibility;
 }
 
 export interface ExternalSegmentAuthenticationStatusQueryResponse {

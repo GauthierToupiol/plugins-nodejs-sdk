@@ -32,6 +32,13 @@ export interface ExternalSegmentCreationRequest {
   feed_destination_id?: string;
 }
 
+export interface DestinationAudienceDeletionRequest {
+  feed_id: string;
+  datamart_id: string;
+  segment_id: string;
+  feed_destination_id?: string;
+}
+
 export interface AudienceFeedBatchContext extends BatchUpdateContext {
   endpoint: string;
   feed_id: string;
