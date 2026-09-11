@@ -2,6 +2,8 @@
 
 # Unreleased
 
+# 0.42.0 2026-09-10
+
 - Add the optional `onDestinationAudienceDeletion()` hook, served on `POST /v1/destination_audience_deletion`, so a connector can delete the audience it created on the destination platform. Defaults to `'not_implemented'` (HTTP 400) like the other optional hooks
 - Add `DestinationAudienceDeletionRequest` (`feed_id`, `datamart_id`, `segment_id`, optional `feed_destination_id`) and `DestinationAudienceDeletionPluginResponse` with the new `DestinationAudienceDeletionStatus`: `'ok'` and `'not_found'` are both successful end states (HTTP 200), `'error'` maps to HTTP 500 and `'not_implemented'` to HTTP 400
 - The platform only calls the route on a plugin version declaring the `CLEANING_AND_DELETION` feature, so implementing the hook is not enough on its own: the feature has to be set on the plugin version. It calls the route while the feed still exists and, on `'ok'` or `'not_found'`, closes the running feed sessions and moves the feed to `PAUSED` — the feed itself is never deleted, and it can no longer be activated nor rebooted
